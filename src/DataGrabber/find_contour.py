@@ -19,7 +19,8 @@ def find_box(image):
     # Draw rectangles
     cnts = cv2.findContours(opening, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     cnts = cnts[0] if len(cnts) == 2 else cnts[1]
-    print(len(cnts))
+    print("Find box succesfully!")
+    # print(len(cnts))
     for c in cnts:
         x,y,w,h = cv2.boundingRect(c)
         # cv2.rectangle(image, (x, y), (x + w, y + h), (36,255,12), 1)

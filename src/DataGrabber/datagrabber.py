@@ -16,8 +16,11 @@ from enum import Enum
 import os
 from .find_contour import find_box
 import json
-from DataGrabber import _root_path
-from DataGrabber.local_log import log_print
+# from DataGrabber import _root_path
+# from DataGrabber.local_log import log_print
+
+_root_path = os.path.dirname(os.path.abspath(__file__))
+log_print = print
 
 def get_path(filename):
     if hasattr(sys, "_MEIPASS"):
@@ -40,6 +43,25 @@ class SystemState(Enum):
     POS_LEFT = 3
     POS_RIGHT = 4
 
+class HoverPreview(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.ToolTip | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.label = QLabel(self)
+        self.layout = QVBoxLayout(self)
+        self.layout.addWidget(self.label)
+        self.pop_width = 150
+        self.setFixedSize(self.pop_width, self.pop_width)
+
+    def set_image(self, image):
+        # self.label.setPixmap(QPixmap.fromImage(image).scaled(100, 100, Qt.KeepAspectRatio))
+        self.label.setPixmap(QPixmap.fromImage(image).scaled(self.pop_width, self.pop_width, Qt.KeepAspectRatio))
+        self.label.setStyleSheet("border: 1px dashed black;")
+
+    def set_position(self, pos):
+        self.move(pos - QPoint(self.pop_width, self.pop_width))
+
 class mywindow(QMainWindow,Ui_MainWindow):
     def __init__(self,app):
         super(mywindow,self).__init__()
@@ -51,6 +73,7 @@ class mywindow(QMainWindow,Ui_MainWindow):
         self.actionImport.triggered.connect(self.import_img)
         self.label_img.mousePressEvent = self.get_pos
         self.label_img.mouseMoveEvent = self.erasing
+        self.label_img.setMouseTracking(True)
         self.pushButton_eraser.setEnabled(False)
         self.pushButton_picker.setEnabled(False)
         self.pushButton_preview.setEnabled(True)
@@ -66,6 +89,10 @@ class mywindow(QMainWindow,Ui_MainWindow):
         self.has_mask = None
         with open(f"./config.json",'r') as f:
             self.system_config = json.load(f)
+
+        self.hover_preview = HoverPreview(self)
+        self.hover_preview.hide()
+        self.setMouseTracking(True)
         
     def load_img_from_file(self,file):
         try:
@@ -232,6 +259,10 @@ class mywindow(QMainWindow,Ui_MainWindow):
         self.system_state = SystemState.POS_RIGHT
 
     def get_pos(self,event):
+        if not hasattr(self, "system_state"):
+            print("The content in the paste board is not a picture!!!")
+            return
+
         if(self.system_state != SystemState.POS_LEFT and self.system_state != SystemState.POS_RIGHT):
             return
         if(self.system_state == SystemState.POS_LEFT):
@@ -249,7 +280,7 @@ class mywindow(QMainWindow,Ui_MainWindow):
         if(self.color_set is not None):
             color = cv2.cvtColor(np.uint8([[self.color_set]]),cv2.COLOR_BGR2HSV)
             color_pixel = color[0][0]
-            log_print(color)
+            # log_print(color)
 
             self.lower_color_lim = array([color_pixel[0]-10,color_pixel[1]-50,color_pixel[2]-20])
             self.higher_color_lim = array([color_pixel[0]+10,color_pixel[1]+50,color_pixel[2]+20])
@@ -314,11 +345,35 @@ class mywindow(QMainWindow,Ui_MainWindow):
             # 如果有黑色像素，取中值
             # 注意行列和矩阵的维度的对应
             # 矩阵中，第一维为行，第二为列。所以对x坐标进行循环， 就应该取出对应的列的所有行
-            if(255 in data[:,i]):
-                ldx = curve_range_height-np.median(np.argwhere(data[:,i]==255))
+            if (255 in data[:,i]):
+                # ldx = curve_range_height-np.median(np.argwhere(data[:,i]==255))
+
+                index_black = np.argwhere(data[:,i]==255)
+                index_mean = np.median(index_black)
+                index_nomal = index_black[np.abs(index_black - index_mean) < 10 ]
+                ldx = curve_range_height - np.median(index_nomal)
+                # ldx = curve_range_height - np.mean(index_nomal)
                 result.append([i,ldx])
         # log_print(array(result))
         return array(result)
+
+    def mouseMoveEvent(self, event):
+        if(self.system_state == SystemState.PICKING_COLOR) and self.label_img.geometry().contains(event.pos()) and not event.buttons():
+            x = event.pos().x()
+            y = event.pos().y()
+            height, width = 31, 31
+            bytesPerLine = 3 * width
+            img_to_show = self.current_img.copy()
+            img_to_show[y, x, :] = [0, 0, 255]
+            img_to_show = img_to_show[y - 15 : y + 16, x - 15: x +16]
+
+            qImg = QtGui.QImage(img_to_show.tobytes(), width, height, bytesPerLine, QtGui.QImage.Format_BGR888)
+            self.hover_preview.set_image(qImg)
+            self.hover_preview.set_position(event.globalPos())
+            self.hover_preview.show()
+        else:
+            self.hover_preview.hide()
+            self.erasing(event)
 
     def pick_color(self,event):
         if(self.system_state == SystemState.PICKING_COLOR):
@@ -386,6 +441,7 @@ class mywindow(QMainWindow,Ui_MainWindow):
         
     def color_picker(self):
         self.label_img.mousePressEvent = self.pick_color
+        self.label_img.mouseMoveEvent = self.mouseMoveEvent
         self.pushButton_preview.setEnabled(True)
         self.update_cursor(ICON_PICKER,40)
         self.system_state = SystemState.PICKING_COLOR
@@ -465,7 +521,10 @@ class mywindow(QMainWindow,Ui_MainWindow):
             return
         for key,value in self.result_list.items():
             # log_print(value)
-            filename = f"{filename[:-4]}_{key}.csv"
+            if len(self.result_list.items()) > 1:
+                filename = f"{filename[:-4]}_{key}.csv"
+            else:
+                filename = f"{filename[:-4]}.csv"
             log_print(filename)
             savetxt(f"{filename}",value,delimiter=',')
 
