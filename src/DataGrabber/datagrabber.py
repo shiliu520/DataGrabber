@@ -1,21 +1,24 @@
 # -*- coding: utf-8 -*-
-from asyncio.windows_events import NULL
 from PIL import Image
-from PIL import ImageGrab
-from numpy import array,savetxt, size,tile,newaxis
+import os, subprocess, platform
+if not (platform.system() == "Linux"):
+    from PIL import ImageGrab
+
 import numpy as np
-import cv2
-import matplotlib.pyplot as plt
+import imageio as iio
+from enum import Enum
 from .ui import Ui_MainWindow
-import sys
+import matplotlib.pyplot as plt
+import cv2, sys, json, os, subprocess
+# from asyncio.windows_events import NULL
+from numpy import array,savetxt, size,tile,newaxis
+
 from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from PyQt5 import QtCore, QtGui, QtWidgets
-from enum import Enum
-import os
+
 from .find_contour import find_box
-import json
 # from DataGrabber import _root_path
 # from DataGrabber.local_log import log_print
 
@@ -87,6 +90,7 @@ class mywindow(QMainWindow,Ui_MainWindow):
         self.spacing = 1
         self.has_frame = False
         self.has_mask = None
+        self.system_state = SystemState.IDLE
         with open(f"./config.json",'r') as f:
             self.system_config = json.load(f)
 
@@ -113,8 +117,18 @@ class mywindow(QMainWindow,Ui_MainWindow):
 
     def load_img_from_clipboard(self):
         try:
-            img_raw = ImageGrab.grabclipboard()
-            img_cvted = cv2.cvtColor(np.array(img_raw),cv2.COLOR_RGB2BGR)
+            if (platform.system() == "Linux"):
+                DISPLAY = os.environ.get("DISPLAY", ":0")
+                FOLDER = os.getcwd()
+                cmd = f'xclip -d {DISPLAY} -selection clipboard -t image/png -o > "{FOLDER}/src/DataGrabber/img/temp.png"'
+                subprocess.run(cmd, shell=True, check=False)
+                png_path = f'{FOLDER}/src/DataGrabber/img/temp.png'
+                temp_img = iio.imread(png_path)
+                img_cvted = cv2.cvtColor(np.array(temp_img),cv2.COLOR_RGB2BGR)
+                os.remove(png_path)
+            else:
+                img_raw = ImageGrab.grabclipboard()
+                img_cvted = cv2.cvtColor(np.array(img_raw),cv2.COLOR_RGB2BGR)
         except TypeError as e:
             log_print(e)
             return
@@ -242,7 +256,8 @@ class mywindow(QMainWindow,Ui_MainWindow):
             x2 = self.pos_right_top[0]
             y2 = self.pos_left_bottom[1]
             cv2.rectangle(img_to_show, (x1, y1), (x2, y2), (36,255,12), 1)
-        qImg = QtGui.QImage(img_to_show.tobytes(), width, height, bytesPerLine, QtGui.QImage.Format_BGR888)
+        img_to_show = cv2.cvtColor(img_to_show, cv2.COLOR_BGR2RGB)
+        qImg = QtGui.QImage(img_to_show.tobytes(), width, height, bytesPerLine, QtGui.QImage.Format_RGB888)
         self.label_img.setPixmap(QtGui.QPixmap(qImg))
         return
 
@@ -367,7 +382,8 @@ class mywindow(QMainWindow,Ui_MainWindow):
             img_to_show[y, x, :] = [0, 0, 255]
             img_to_show = img_to_show[y - 15 : y + 16, x - 15: x +16]
 
-            qImg = QtGui.QImage(img_to_show.tobytes(), width, height, bytesPerLine, QtGui.QImage.Format_BGR888)
+            img_to_show = cv2.cvtColor(img_to_show, cv2.COLOR_BGR2RGB)
+            qImg = QtGui.QImage(img_to_show.tobytes(), width, height, bytesPerLine, QtGui.QImage.Format_RGB888)
             self.hover_preview.set_image(qImg)
             self.hover_preview.set_position(event.globalPos())
             self.hover_preview.show()
